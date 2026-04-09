@@ -1,0 +1,23 @@
+# FastAPI core
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9
+
+# Trino connector
+trino==0.328.0
+
+# MinIO S3 client
+minio==7.2.7
+
+# Vault client
+hvac==2.3.0
+
+# HTTP client (for Nessie + Dagster GraphQL)
+httpx==0.27.0
+
+# Data
+pydantic==2.9.2
+pydantic-settings==2.5.2
+
+# Utils
+python-dotenv==1.0.1
