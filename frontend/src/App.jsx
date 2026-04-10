@@ -2,11 +2,12 @@ import React, { useState } from 'react'
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, Database, GitBranch, Play, Search,
-  HardDrive, Settings, ChevronRight, HeartPulse
+  HardDrive, Settings, ChevronRight, HeartPulse, PanelLeftClose, PanelLeftOpen
 } from 'lucide-react'
 
 import Dashboard from './pages/Dashboard'
 import ModelManager from './pages/ModelManager'
+import Pipelines from './pages/Pipelines'
 import PipelineStudio from './pages/PipelineStudio'
 import GitExplorer from './pages/GitExplorer'
 import QueryEditor from './pages/QueryEditor'
@@ -27,19 +28,28 @@ const NAV_ITEMS = [
 ]
 
 export default function App() {
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+
   return (
     <BrowserRouter>
       <div className="app-layout">
         {/* Sidebar */}
-        <aside className="sidebar">
-          <div className="sidebar-header">
-            <div className="sidebar-logo">
+        <aside className={`sidebar ${isSidebarOpen ? '' : 'collapsed'}`}>
+          <div className="sidebar-header" style={{ display: 'flex', alignItems: 'center', justifyContent: isSidebarOpen ? 'space-between' : 'center', padding: isSidebarOpen ? '20px 16px' : '20px 0' }}>
+            <div className="sidebar-logo" style={{ display: isSidebarOpen ? 'flex' : 'none' }}>
               <div className="sidebar-logo-icon">DE</div>
               <div>
                 <div className="sidebar-logo-text">DE Studio</div>
                 <div className="sidebar-logo-sub">Data Engineering Platform</div>
               </div>
             </div>
+            <button 
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', padding: 4 }}
+              title={isSidebarOpen ? "Collapse Sidebar" : "Expand Sidebar"}
+            >
+              {isSidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
+            </button>
           </div>
           <nav className="sidebar-nav">
             {NAV_ITEMS.map((item, i) =>
@@ -67,7 +77,8 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/models" element={<ModelManager />} />
-            <Route path="/pipelines" element={<PipelineStudio />} />
+            <Route path="/pipelines" element={<Pipelines />} />
+            <Route path="/pipelines/:id" element={<PipelineStudio />} />
             <Route path="/query" element={<QueryEditor />} />
             <Route path="/git" element={<GitExplorer />} />
             <Route path="/storage" element={<StorageBrowser />} />

@@ -2,9 +2,9 @@ FROM python:3.13-alpine3.21
 
 WORKDIR /app
 
-# System deps
+# System deps — build tools for asyncpg (C extension) and libffi
 RUN sed -i 's/https/http/g' /etc/apk/repositories && \
-    apk add --no-cache gcc musl-dev libffi-dev
+    apk add --no-cache gcc musl-dev libffi-dev postgresql-dev
 
 # Python deps
 COPY requirements.txt .

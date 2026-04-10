@@ -165,6 +165,30 @@ html, body, #root {
   flex-shrink: 0;
 }
 
+/* ── Collapsed Sidebar ──────────────────────────────── */
+.sidebar.collapsed {
+  width: 68px;
+  min-width: 68px;
+}
+
+.sidebar.collapsed .sidebar-logo { display: none !important; }
+
+.sidebar.collapsed .sidebar-section-label {
+  visibility: hidden;
+  height: 10px;
+  padding: 0;
+  margin: 10px 0;
+}
+
+.sidebar.collapsed .sidebar-link {
+  justify-content: center;
+  padding: 12px;
+}
+
+.sidebar.collapsed .sidebar-link span {
+  display: none;
+}
+
 /* ── Main Content ───────────────────────────────────── */
 .main-content {
   flex: 1;
@@ -225,6 +249,48 @@ html, body, #root {
 .card-body {
   padding: 20px;
 }
+
+/* ── Toggle Switch ───────────────────────────────────── */
+.ios-switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+}
+.ios-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.ios-switch .slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  transition: .3s;
+  border-radius: 20px;
+}
+.ios-switch .slider:before {
+  position: absolute;
+  content: "";
+  height: 14px;
+  width: 14px;
+  left: 2px;
+  bottom: 2px;
+  background-color: var(--text-muted);
+  transition: .3s;
+  border-radius: 50%;
+}
+.ios-switch input:checked + .slider {
+  background-color: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+.ios-switch input:checked + .slider:before {
+  transform: translateX(16px);
+  background-color: #fff;
+}
+
 
 /* ── Stats Grid ─────────────────────────────────────── */
 .stats-grid {
@@ -1305,4 +1371,71 @@ select option {
   pointer-events: none;
   transition: all 0.15s ease;
   z-index: 100;
+}
+
+.react-flow__controls-button {
+  background-color: #111827 !important;
+  border-bottom-color: rgba(255,255,255,0.08) !important;
+  fill: #64748b !important;
+  transition: all 0.15s !important;
+}
+.react-flow__controls-button:hover {
+  background-color: rgba(255,255,255,0.06) !important;
+  fill: #e2e8f0 !important;
+}
+.react-flow__controls-button svg {
+  fill: inherit !important;
+}
+.react-flow__minimap {
+  background-color: #0d1117 !important;
+  border: 1px solid rgba(255,255,255,0.07) !important;
+  border-radius: 8px !important;
+}
+.react-flow__edge-path {
+  transition: stroke 0.2s;
+}
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: #6366f1 !important;
+  stroke-width: 2.5px !important;
+}
+
+/* ── Pipeline Studio Animations ─────────────────────────────── */
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.6; transform: scale(0.85); }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 6px currentColor; }
+  50%       { box-shadow: 0 0 14px currentColor; }
+}
+
+/* ── datetime-local input dark theme ─────────────────────── */
+input[type="datetime-local"] {
+  color-scheme: dark;
+}
+
+/* ── Pipeline card transition ─────────────────────────────── */
+.pipeline-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.pipeline-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-accent) !important;
+  box-shadow: var(--shadow-glow);
 }

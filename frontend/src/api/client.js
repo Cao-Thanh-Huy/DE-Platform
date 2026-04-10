@@ -52,14 +52,33 @@ export const vacuumTable = (schema, table, retention_threshold='7d', retain_last
 
 export const insertTableData  = (schema, table, data, branch='main')     => request(`/models/tables/${schema}/${table}/insert?branch=${encodeURIComponent(branch)}`, { method: 'POST', body: JSON.stringify(data) });
 
-// ── Pipelines ───────────────────
-export const listPipelines    = ()        => request('/pipelines/');
-export const getPipeline      = (name)    => request(`/pipelines/${name}`);
-export const createPipeline   = (data)    => request('/pipelines/', { method: 'POST', body: JSON.stringify(data) });
-export const updatePipeline   = (name, data) => request(`/pipelines/${name}`, { method: 'PUT', body: JSON.stringify(data) });
-export const deletePipeline   = (name)    => request(`/pipelines/${name}`, { method: 'DELETE' });
-export const triggerPipeline  = (name)    => request(`/pipelines/${name}/run`, { method: 'POST' });
-export const getPipelineRuns  = (name)    => request(`/pipelines/${name}/runs`);
+// ── Pipelines ────────────────────────────────────────────────────────────────
+export const listPipelines         = ()            => request('/pipelines/');
+export const getPipeline           = (id)          => request(`/pipelines/${id}`);
+export const createPipeline        = (data)        => request('/pipelines/', { method: 'POST', body: JSON.stringify(data) });
+export const updatePipeline        = (id, data)    => request(`/pipelines/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+export const deletePipeline        = (id)          => request(`/pipelines/${id}`, { method: 'DELETE' });
+export const publishPipeline       = (id, data)    => request(`/pipelines/${id}/publish`, { method: 'POST', body: JSON.stringify(data) });
+export const clonePipeline         = (id, data)    => request(`/pipelines/${id}/clone`, { method: 'POST', body: JSON.stringify(data) });
+export const togglePipelineEnabled = (id)          => request(`/pipelines/${id}/toggle-enabled`, { method: 'POST' });
+
+export const getPipelineVersions   = (id)          => request(`/pipelines/${id}/versions`);
+export const getVersionSQL         = (id, version) => request(`/pipelines/${id}/versions/${version}/sql`);
+
+// Runs
+export const triggerPipelineRun = (id, version) => {
+  const url = version ? `/pipelines/${id}/run?version=${version}` : `/pipelines/${id}/run`;
+  return request(url, { method: 'POST' });
+};
+export const getPipelineRuns    = (id)             => request(`/pipelines/${id}/runs`);
+export const getRun             = (runId)          => request(`/pipelines/runs/${runId}`);
+export const cancelPipelineRun  = (runId)          => request(`/pipelines/runs/${runId}/cancel`, { method: 'POST' });
+
+// Schedule
+export const setPipelineSchedule    = (id, data)  => request(`/pipelines/${id}/schedule`, { method: 'POST', body: JSON.stringify(data) });
+export const getPipelineSchedule    = (id)        => request(`/pipelines/${id}/schedule`);
+export const deletePipelineSchedule = (id)        => request(`/pipelines/${id}/schedule`, { method: 'DELETE' });
+
 
 // ── Nessie Git ──────────────────
 export const listBranches     = ()        => request('/nessie/branches');

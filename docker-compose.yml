@@ -196,6 +196,7 @@ services:
       TRINO_HOST: trino
       TRINO_PORT: "8080"
       PIPELINE_DEFINITIONS_DIR: /opt/dagster/pipelines
+      BACKEND_API_URL: http://backend:8000
     volumes:
       - ./dagster/dagster.yaml:/opt/dagster/dagster_home/dagster.yaml:ro
       - ./dagster/workspace.yaml:/opt/dagster/dagster_home/workspace.yaml:ro
@@ -228,6 +229,7 @@ services:
       TRINO_HOST: trino
       TRINO_PORT: "8080"
       PIPELINE_DEFINITIONS_DIR: /opt/dagster/pipelines
+      BACKEND_API_URL: http://backend:8000
     volumes:
       - ./dagster/dagster.yaml:/opt/dagster/dagster_home/dagster.yaml:ro
       - ./dagster/workspace.yaml:/opt/dagster/dagster_home/workspace.yaml:ro

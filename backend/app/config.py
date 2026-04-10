@@ -30,7 +30,10 @@ class Settings(BaseSettings):
     dagster_webserver_url: str = "http://dagster-webserver:3000"
     dagster_graphql_url: str = "http://dagster-webserver:3000/graphql"
 
-    # --- Pipeline definitions (shared volume) ---
+    # --- Pipeline Registry (Postgres async) ---
+    database_url: str = "postgresql+asyncpg://deplatform:deplatform123@postgres:5432/deplatform"
+
+    # --- Pipeline definitions (legacy, kept for backward compat) ---
     pipeline_definitions_dir: str = "/opt/dagster/pipelines"
 
     class Config:
