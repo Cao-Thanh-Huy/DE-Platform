@@ -5,7 +5,7 @@ Entry point: cung cấp REST API cho DE Studio frontend.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import models, pipelines, nessie, query, storage
+from app.routers import models, pipelines, nessie, query, storage, maintenance
 
 app = FastAPI(
     title="DE Platform API",
@@ -28,6 +28,7 @@ app.include_router(pipelines.router, prefix="/api/pipelines", tags=["Pipelines"]
 app.include_router(nessie.router, prefix="/api/nessie", tags=["Nessie Git"])
 app.include_router(query.router, prefix="/api/query", tags=["Query Engine"])
 app.include_router(storage.router, prefix="/api/storage", tags=["Storage"])
+app.include_router(maintenance.router, prefix="/api/maintenance", tags=["Maintenance"])
 
 
 @app.get("/api/health", tags=["Health"])

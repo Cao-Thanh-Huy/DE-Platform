@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, Database, GitBranch, Play, Search,
-  HardDrive, Settings, ChevronRight
+  HardDrive, Settings, ChevronRight, HeartPulse
 } from 'lucide-react'
 
 import Dashboard from './pages/Dashboard'
@@ -11,6 +11,7 @@ import PipelineStudio from './pages/PipelineStudio'
 import GitExplorer from './pages/GitExplorer'
 import QueryEditor from './pages/QueryEditor'
 import StorageBrowser from './pages/StorageBrowser'
+import CatalogHealth from './pages/CatalogHealth'
 
 const NAV_ITEMS = [
   { section: 'Tổng quan' },
@@ -22,6 +23,7 @@ const NAV_ITEMS = [
   { section: 'Quản lý' },
   { path: '/git', icon: GitBranch, label: 'Git (Nessie)' },
   { path: '/storage', icon: HardDrive, label: 'Storage (MinIO)' },
+  { path: '/catalog-health', icon: HeartPulse, label: 'Catalog Health' },
 ]
 
 export default function App() {
@@ -69,6 +71,7 @@ export default function App() {
             <Route path="/query" element={<QueryEditor />} />
             <Route path="/git" element={<GitExplorer />} />
             <Route path="/storage" element={<StorageBrowser />} />
+            <Route path="/catalog-health" element={<CatalogHealth />} />
           </Routes>
         </main>
       </div>

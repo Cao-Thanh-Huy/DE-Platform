@@ -25,11 +25,12 @@
 7. [API Reference](#7-api-reference)
 8. [Pipeline Studio — Cách tạo Pipeline động](#8-pipeline-studio--cách-tạo-pipeline-động)
 9. [Data Model Manager — Quản lý vòng đời Iceberg](#9-data-model-manager--quản-lý-vòng-đời-iceberg)
-10. [Nessie Git — Data Versioning](#10-nessie-git--data-versioning)
-11. [Quản lý tài nguyên RAM](#11-quản-lý-tài-nguyên-ram)
-12. [Biến môi trường (.env)](#12-biến-môi-trường-env)
-13. [Troubleshooting](#13-troubleshooting)
-14. [Roadmap mở rộng](#14-roadmap-mở-rộng)
+10. [Catalog Health Center — Giám sát & dọn dẹp Catalog](#10-catalog-health-center--giám-sát--dọn-dẹp-catalog)
+11. [Nessie Git — Data Versioning](#11-nessie-git--data-versioning)
+12. [Quản lý tài nguyên RAM](#12-quản-lý-tài-nguyên-ram)
+13. [Biến môi trường (.env)](#13-biến-môi-trường-env)
+14. [Troubleshooting](#14-troubleshooting)
+15. [Roadmap mở rộng](#15-roadmap-mở-rộng)
 
 ---
 
@@ -44,7 +45,7 @@
 ┌─────────────────────▼──────────────────────────────────────┐
 │               FastAPI Backend (localhost:8000)               │
 │  /api/models │ /api/pipelines │ /api/nessie │ /api/query   │
-│                  /api/storage │ /api/health                  │
+│           /api/storage │ /api/maintenance │ /api/health      │
 └──┬──────────┬────────┬────────┬──────────────────┬─────────┘
    │          │        │        │                  │
    ▼          ▼        ▼        ▼                  ▼
@@ -134,7 +135,8 @@ DE-Platform-1/
 │       │   ├── pipelines.py    ← CRUD pipeline JSON defs + trigger + runs
 │       │   ├── nessie.py       ← Branch/tag/merge/diff qua Nessie REST v2
 │       │   ├── query.py        ← Execute SQL trên Trino
-│       │   └── storage.py      ← Browse/upload/delete files trên MinIO
+│       │   ├── storage.py      ← Browse/upload/delete files trên MinIO
+│       │   └── maintenance.py  ← [NEW] Catalog Health: SSE scan, optimize, vacuum, orphan cleanup
 │       └── services/
 │           ├── trino_service.py    ← trino-python-client wrapper
 │           ├── nessie_service.py   ← Nessie REST API v2 async client
@@ -157,11 +159,12 @@ DE-Platform-1/
         │   └── index.css       ← Design system: dark theme, glassmorphism
         └── pages/
             ├── Dashboard.jsx       ← Tổng quan, stats, service list
-            ├── ModelManager.jsx    ← CRUD Iceberg tables (schema → table → columns)
+            ├── ModelManager.jsx    ← CRUD Iceberg tables: Schema Explorer, 5 Tabs per table
             ├── PipelineStudio.jsx  ← Tạo/chạy/xem logs pipeline (như Glue)
             ├── GitExplorer.jsx     ← Nessie branches, commits, merge, tags
             ├── QueryEditor.jsx     ← SQL editor + execute + export CSV
-            └── StorageBrowser.jsx  ← Duyệt MinIO buckets/folders/files
+            ├── StorageBrowser.jsx  ← Duyệt MinIO buckets/folders/files
+            └── CatalogHealth.jsx   ← [NEW] Giám sát toàn catalog: orphan files, snapshot stats, cleanup
 ```
 
 ---
@@ -547,6 +550,7 @@ def lakehouse_repository():
 | `nessie.py` | `/api/nessie` | Git operations: branch, tag, merge, diff |
 | `query.py` | `/api/query` | Execute SQL trên Trino |
 | `storage.py` | `/api/storage` | Browse/upload/delete MinIO objects |
+| `maintenance.py` | `/api/maintenance` | Catalog Health: scan SSE, optimize, vacuum, orphan cleanup |
 
 **Services layer** (logic tách riêng):
 ```
@@ -588,11 +592,12 @@ class Settings(BaseSettings):
 | Page | Route | Chức năng |
 |------|-------|-----------|
 | Dashboard | `/` | Stats tổng, health check, danh sách services |
-| Model Manager | `/models` | Chọn schema → xem tables → xem columns → tạo/xóa |
+| Model Manager | `/models` | Schema Explorer + 6 tabs per table: Overview, Schema, Preview, Snapshots, DDL, Optimize |
 | Pipeline Studio | `/pipelines` | Tạo pipeline (name + steps + schedule + branch) → Run |
 | Git Explorer | `/git` | Branches list, commit log, tạo/xóa branch, merge |
 | SQL Editor | `/query` | Viết SQL → Chạy (Ctrl+Enter) → Xem kết quả → Export CSV |
 | Storage Browser | `/storage` | Duyệt buckets → folders → files → delete |
+| Catalog Health | `/catalog-health` | Scan orphan files + snapshots toàn catalog, cleanup hàng loạt |
 
 **API Client** (`src/api/client.js`):  
 - Tất cả requests đều prefix `/api` → Nginx proxy → `http://backend:8000`
@@ -615,7 +620,6 @@ User upload CSV → DE Studio
 → FastAPI (minio_service.put_object)
 → MinIO bucket "raw-data"
 ```
-
 ### 6.2 Tạo bảng Iceberg (Bronze layer)
 ```
 User tạo bảng → DE Studio
@@ -830,7 +834,7 @@ Giao diện **Model Manager** trong DE Studio cung cấp khả năng quản lý 
 
 ---
 
-## 10. Nessie Git — Data Versioning
+## 11. Nessie Git — Data Versioning
 
 ### Khái niệm chính
 
@@ -877,7 +881,7 @@ POST /api/nessie/tags
 
 ---
 
-## 11. Quản lý tài nguyên RAM
+## 12. Quản lý tài nguyên RAM
 
 **Tổng RAM limit: ~3.8GB** (để lại ~4.2GB cho OS + overhead)
 
@@ -904,7 +908,7 @@ POST /api/nessie/tags
 
 ---
 
-## 12. Biến môi trường (.env)
+## 13. Biến môi trường (.env)
 
 ```bash
 # PostgreSQL
@@ -944,7 +948,7 @@ FRONTEND_PORT=3000
 
 ---
 
-## 13. Troubleshooting
+## 14. Troubleshooting
 
 ### Trino không kết nối được Nessie
 
@@ -1017,13 +1021,24 @@ docker compose up -d
 
 ---
 
-## 14. Roadmap mở rộng
+## 15. Roadmap mở rộng
+
+### ✅ Đã hoàn thành
+- [x] Data Model Manager: CRUD table, Schema Evolution, DDL viewer
+- [x] Tab Overview với Stats real-time
+- [x] Tab Preview với Time Travel qua Snapshot ID
+- [x] Tab Snapshots: Timeline, CURRENT badge, Rollback, View direct to Preview
+- [x] Tab Optimize: File Compaction + Vacuum (Expire Snapshots) với retention configurable
+- [x] Catalog Health Center: SSE streaming scan, Orphan Files detection, Bulk cleanup
+- [x] Catalog Health: Branch selector, Progress bar, Summary Cards, per-table cleanup
 
 ### Ngắn hạn
 - [ ] Thêm xác thực (JWT auth) cho FastAPI + DE Studio
 - [ ] Python pipeline steps (không chỉ SQL) trong Dagster
 - [ ] Upload file raw → parse CSV → tự động ingest vào Bronze layer
 - [ ] Alerts khi pipeline fail (webhook/email qua Dagster sensor)
+- [ ] Catalog Health: Schedule tự động cleanup (Dagster job hàng tuần)
+- [ ] Catalog Health: Ước tính dung lượng có thể giải phóng trước khi dọn
 
 ### Trung hạn
 - [ ] dbt integration: Viết models dbt, chạy qua Dagster, kết quả lưu Iceberg
@@ -1038,4 +1053,4 @@ docker compose up -d
 
 ---
 
-*Tài liệu tạo ngày 2026-04-09 | DE Platform v1.0*
+*Tài liệu cập nhật ngày 2026-04-10 | DE Platform v1.1 — Data Model Studio + Catalog Health Center*

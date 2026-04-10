@@ -72,15 +72,152 @@ function Toast({ toasts, remove }) {
 }
 
 // ── Main ─────────────────────────────────────────────────────
+
+function ConfirmModal({ title, message, confirmText = 'Xác nhận', onConfirm, onCancel }) {
+  return (
+    <div className="modal-overlay" style={{ background: 'rgba(0,0,0,0.6)', zIndex: 9999 }}>
+      <div className="modal-content" style={{ maxWidth: 400 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, color: 'var(--warning)' }}>
+           <AlertTriangle size={20} /> <h3 style={{ margin: 0, color: 'var(--text)' }}>{title}</h3>
+        </div>
+        <p style={{ color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.5 }}>{message}</p>
+        <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 24 }}>
+          <button className="btn btn-secondary" onClick={onCancel}>Hủy thao tác</button>
+          <button className="btn btn-primary" style={{ background: 'var(--warning)', borderColor: 'var(--warning)' }} onClick={onConfirm}>{confirmText}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
+function TabMaintenance({ branch, schema, table, toast, confirm }) {
+  const [retention, setRetention] = useState("7d")
+  const [loadingOpt, setLoadingOpt] = useState(false)
+  const [loadingVac, setLoadingVac] = useState(false)
+
+  async function handleOptimize() {
+    confirm({
+      title: "Chạy Compaction",
+      message: "Bạn có chắc chắn muốn chạy Compaction? Lệnh này sẽ kết hợp các file dữ liệu nhỏ thành các block hiệu quả hơn.",
+      onConfirm: async () => {
+        setLoadingOpt(true)
+        try {
+          const res = await api.optimizeTable(schema, table, branch)
+          toast(res.message || "Đã tối ưu hóa file layout xong!", "success")
+        } catch (err) {
+          toast("Lỗi khi Optimize: " + err.message, "error")
+        }
+        setLoadingOpt(false)
+        confirm(null)
+      },
+      onCancel: () => confirm(null)
+    })
+  }
+
+  async function handleVacuum() {
+    confirm({
+      title: "Dọn dẹp lịch sử Time-Travel",
+      message: `Bạn có chắc muốn xóa vĩnh viễn các file snapshot cũ hơn [${retention}] (Trừ snapshot hiện tại)? Việc này làm mất khả năng Rollback về mốc trước thời hạn đó!`,
+      onConfirm: async () => {
+        setLoadingVac(true)
+        try {
+          const res = await api.vacuumTable(schema, table, retention, 1, branch)
+          toast(res.message || "Đã dọn dẹp snapshots cũ!", "success")
+        } catch (err) {
+          toast("Lỗi khi Vacuum: " + err.message, "error")
+        }
+        setLoadingVac(false)
+        confirm(null)
+      },
+      onCancel: () => confirm(null)
+    })
+  }
+
+  return (
+    <div style={{ padding: '20px 0' }}>
+
+      {/* Card 1: Compaction */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-header">
+          <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>🚀</span> Data Compaction
+            <span className="badge badge-info" style={{ fontWeight: 400, fontSize: 11 }}>EXECUTE OPTIMIZE</span>
+          </h2>
+        </div>
+        <div className="card-body">
+          <p style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.7, marginBottom: 16 }}>
+            Streaming/Micro-batch pipelines thường sinh ra hàng ngàn file nhỏ lẻ (small files problem).
+            Lệnh <code style={{ background: 'var(--bg-glass)', padding: '1px 6px', borderRadius: 4, fontFamily: 'monospace' }}>OPTIMIZE</code> sẽ
+            gom nhóm chúng thành các file Parquet lớn chuẩn mực (~512MB), giúp tăng tốc query đáng kể.
+          </p>
+          <button className="btn btn-primary" onClick={handleOptimize} disabled={loadingOpt}>
+            {loadingOpt ? <RefreshCw size={14} className="spin" /> : <RefreshCw size={14} />}
+            {loadingOpt ? 'Đang chạy...' : 'Run File Compaction'}
+          </button>
+        </div>
+      </div>
+
+      {/* Card 2: Vacuum */}
+      <div className="card">
+        <div className="card-header">
+          <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>🧹</span> Vacuum — Expire Snapshots
+            <span className="badge badge-warning" style={{ fontWeight: 400, fontSize: 11 }}>Không thể hoàn tác</span>
+          </h2>
+        </div>
+        <div className="card-body">
+          <p style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.7, marginBottom: 16 }}>
+            Iceberg tích lũy Snapshots theo thời gian để phục vụ Time-Travel & Rollback. Tính năng <strong>Vacuum</strong> sẽ
+            vĩnh viễn xóa các Snapshot cũ hơn ngưỡng thời gian bạn đặt (giữ lại ít nhất 1 snapshot gần nhất).
+            Sau khi chạy, Time-Travel về các mốc trước ngưỡng này sẽ không còn khả dụng.
+          </p>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12 }}>
+            <div className="form-group" style={{ marginBottom: 0, width: 200 }}>
+              <label className="form-label">Thời hạn giữ lại (Retention)</label>
+              <input
+                type="text"
+                value={retention}
+                onChange={e => setRetention(e.target.value)}
+                className="form-input"
+                placeholder="VD: 7d, 24h, 30d"
+                title="Cú pháp: Nd = N ngày, Nh = N giờ"
+              />
+            </div>
+            <button
+              className="btn btn-danger"
+              onClick={handleVacuum}
+              disabled={loadingVac}
+              style={{ marginBottom: 0, flexShrink: 0 }}
+            >
+              {loadingVac ? <RefreshCw size={14} className="spin" /> : <AlertTriangle size={14} />}
+              {loadingVac ? 'Đang dọn...' : 'Run Vacuum'}
+            </button>
+          </div>
+          <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
+            💡 Khuyến nghị: <strong>7d</strong> cho Production. Để <strong>30d</strong> nếu cần nhiều lịch sử Time-Travel.
+          </p>
+        </div>
+      </div>
+
+    </div>
+  )
+}
+
 export default function ModelManager() {
+
   const [schemas, setSchemas]           = useState([])
   const [openSchemas, setOpenSchemas]   = useState({})
   const [schemaTables, setSchemaTables] = useState({}) // {schemaName: [tableName,...]}
   const [selected, setSelected]         = useState(null) // {schema, table}
   const [activeTab, setActiveTab]       = useState('overview')
+  const [previewSnapshotId, setPreviewSnapshotId] = useState(null)
+  const [confirmDialog, setConfirmDialog] = useState(null)
   const [toasts, setToasts]             = useState([])
   const [showCreateSchema, setShowCreateSchema] = useState(false)
   const [showCreateTable, setShowCreateTable]   = useState(false)
+    const [branches, setBranches]         = useState([])
+  const [activeBranch, setActiveBranch] = useState('main')
 
   // Toast helpers
   const toast = (msg, type = 'success') => {
@@ -90,23 +227,24 @@ export default function ModelManager() {
   }
   const removeToast = (id) => setToasts(p => p.filter(t => t.id !== id))
 
-  useEffect(() => { loadSchemas() }, [])
+  useEffect(() => { api.listBranches().then(d => setBranches(d.branches || [])).catch(()=>{}) }, [])
+  useEffect(() => { loadSchemas(activeBranch) }, [activeBranch])
 
-  async function loadSchemas() {
+  async function loadSchemas(branch) {
     try {
-      const data = await api.getSchemas()
+      const data = await api.getSchemas(branch)
       const list = data.schemas || []
       setSchemas(list)
       // auto-open bronze/silver/gold
       const autoOpen = {}
-      list.forEach(s => { if (['bronze','silver','gold'].includes(s)) autoOpen[s] = true })
+      list.forEach(s => { if (['bronze','silver','gold'].includes(s)) { autoOpen[s] = true; loadTablesForSchema(s, branch); } })
       setOpenSchemas(prev => ({ ...autoOpen, ...prev }))
     } catch (e) { toast('Không load được schemas', 'error') }
   }
 
-  async function loadTablesForSchema(schema) {
+  async function loadTablesForSchema(schema, branch = activeBranch) {
     try {
-      const data = await api.getTables(schema)
+      const data = await api.getTables(schema, branch)
       setSchemaTables(prev => ({ ...prev, [schema]: data.tables || [] }))
     } catch { setSchemaTables(prev => ({ ...prev, [schema]: [] })) }
   }
@@ -114,18 +252,19 @@ export default function ModelManager() {
   function toggleSchema(schema) {
     const next = !openSchemas[schema]
     setOpenSchemas(prev => ({ ...prev, [schema]: next }))
-    if (next && !schemaTables[schema]) loadTablesForSchema(schema)
+    if (next && !schemaTables[schema]) loadTablesForSchema(schema, activeBranch)
   }
 
   function selectTable(schema, table) {
     setSelected({ schema, table })
     setActiveTab('overview')
+    setPreviewSnapshotId(null)
   }
 
   async function handleDropSchema(schema) {
     if (!window.confirm(`Xóa schema "${schema}"? Schema phải EMPTY.`)) return
     try {
-      await api.dropSchema(schema)
+      await api.dropSchema(schema, activeBranch)
       toast(`Đã xóa schema "${schema}"`)
       setSchemas(p => p.filter(s => s !== schema))
       setSchemaTables(p => { const n = {...p}; delete n[schema]; return n })
@@ -136,7 +275,7 @@ export default function ModelManager() {
   async function handleDropTable(schema, table) {
     if (!window.confirm(`Xóa bảng "${schema}.${table}"?\nThao tác này KHÔNG THỂ hoàn tác.`)) return
     try {
-      await api.dropTable(schema, table)
+      await api.dropTable(schema, table, activeBranch)
       toast(`Đã xóa bảng "${table}"`)
       setSchemaTables(prev => ({ ...prev, [schema]: (prev[schema] || []).filter(t => t !== table) }))
       if (selected?.schema === schema && selected?.table === table) setSelected(null)
@@ -144,7 +283,7 @@ export default function ModelManager() {
   }
 
   function refreshCurrentSchema() {
-    if (selected) loadTablesForSchema(selected.schema)
+    if (selected) loadTablesForSchema(selected.schema, activeBranch)
   }
 
   const tabs = [
@@ -153,6 +292,7 @@ export default function ModelManager() {
     { id: 'preview',    label: 'Preview',    icon: <Eye size={13} /> },
     { id: 'snapshots',  label: 'Snapshots',  icon: <Camera size={13} /> },
     { id: 'ddl',        label: 'DDL',        icon: <Code size={13} /> },
+    { id: 'maintenance', label: 'Optimize',  icon: <Settings2 size={13} /> },
   ]
 
   return (
@@ -163,7 +303,7 @@ export default function ModelManager() {
           <Database size={18} /> Data Models
         </h1>
         <div className="flex gap-2">
-          <button className="btn btn-secondary btn-sm" onClick={loadSchemas}>
+          <button className="btn btn-secondary btn-sm" onClick={() => loadSchemas(activeBranch)}>
             <RefreshCw size={13} /> Refresh
           </button>
           <button className="btn btn-secondary btn-sm" onClick={() => setShowCreateSchema(true)}>
@@ -179,8 +319,23 @@ export default function ModelManager() {
       <div className="model-layout" style={{ height: 'calc(100vh - 56px)' }}>
         {/* LEFT — Schema Tree */}
         <div className="schema-panel">
-          <div className="schema-panel-header">
+          <div className="schema-panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3>Catalog Explorer</h3>
+            <select
+              className="form-select"
+              style={{ width: 100, fontSize: 12, padding: '2px 8px' }}
+              value={activeBranch}
+              onChange={e => {
+                const b = e.target.value;
+                setActiveBranch(b);
+                setSchemas([]);
+                setSchemaTables({});
+                setSelected(null);
+                setOpenSchemas({});
+              }}
+            >
+              {branches.map(b => <option key={b.name} value={b.name}>{b.name}</option>)}
+            </select>
           </div>
           <div className="schema-tree">
             {schemas.length === 0 ? (
@@ -266,6 +421,7 @@ export default function ModelManager() {
                 </div>
                 <div className="detail-actions">
                   <RenameTableInline
+                    branch={activeBranch}
                     schema={selected.schema}
                     table={selected.table}
                     onSuccess={(newName) => {
@@ -303,23 +459,27 @@ export default function ModelManager() {
               {/* Tab content */}
               <div className="tab-content">
                 {activeTab === 'overview' && (
-                  <TabOverview schema={selected.schema} table={selected.table} toast={toast} />
+                  <TabOverview branch={activeBranch} schema={selected.schema} table={selected.table} toast={toast} />
                 )}
                 {activeTab === 'schema' && (
                   <TabSchema
+                    branch={activeBranch}
                     schema={selected.schema}
                     table={selected.table}
                     toast={toast}
                   />
                 )}
                 {activeTab === 'preview' && (
-                  <TabPreview schema={selected.schema} table={selected.table} />
+                  <TabPreview branch={activeBranch} schema={selected.schema} table={selected.table} toast={toast} initialSnapshotId={previewSnapshotId} />
                 )}
                 {activeTab === 'snapshots' && (
-                  <TabSnapshots schema={selected.schema} table={selected.table} onTimeTravelPreview={() => setActiveTab('preview')} />
+                  <TabSnapshots branch={activeBranch} schema={selected.schema} table={selected.table} onTimeTravelPreview={(snapId) => { setPreviewSnapshotId(String(snapId)); setActiveTab('preview') }} toast={toast} confirm={setConfirmDialog} />
                 )}
                 {activeTab === 'ddl' && (
-                  <TabDDL schema={selected.schema} table={selected.table} toast={toast} />
+                  <TabDDL branch={activeBranch} schema={selected.schema} table={selected.table} toast={toast} />
+                )}
+                {activeTab === 'maintenance' && (
+                  <TabMaintenance branch={activeBranch} schema={selected.schema} table={selected.table} toast={toast} confirm={setConfirmDialog} />
                 )}
               </div>
             </>
@@ -328,8 +488,10 @@ export default function ModelManager() {
       </div>
 
       {/* Modals */}
+      {confirmDialog && <ConfirmModal {...confirmDialog} />}
       {showCreateSchema && (
         <CreateSchemaModal
+          branch={activeBranch}
           onClose={() => setShowCreateSchema(false)}
           onSuccess={(name) => {
             toast(`Đã tạo schema "${name}"`)
@@ -341,6 +503,7 @@ export default function ModelManager() {
       )}
       {showCreateTable && (
         <CreateTableWizard
+          branch={activeBranch}
           schemas={schemas}
           defaultSchema={selected?.schema || schemas[0] || 'bronze'}
           onClose={() => setShowCreateTable(false)}
@@ -354,13 +517,14 @@ export default function ModelManager() {
         />
       )}
 
+      
       <Toast toasts={toasts} remove={removeToast} />
     </>
   )
 }
 
 // ── Rename inline button ──────────────────────────────────────
-function RenameTableInline({ schema, table, onSuccess, onError }) {
+function RenameTableInline({ branch, schema, table, onSuccess, onError }) {
   const [editing, setEditing] = useState(false)
   const [val, setVal]         = useState(table)
   const [loading, setLoading] = useState(false)
@@ -369,7 +533,7 @@ function RenameTableInline({ schema, table, onSuccess, onError }) {
     if (!val.trim() || val === table) { setEditing(false); return }
     setLoading(true)
     try {
-      await api.renameTable(schema, table, { new_name: val.trim() })
+      await api.renameTable(schema, table, { new_name: val.trim() }, branch)
       onSuccess(val.trim())
       setEditing(false)
     } catch (e) { onError(e.message) }
@@ -403,7 +567,7 @@ function RenameTableInline({ schema, table, onSuccess, onError }) {
 }
 
 // ── Tab: Overview ─────────────────────────────────────────────
-function TabOverview({ schema, table, toast }) {
+function TabOverview({ branch, schema, table, toast }) {
   const [stats, setStats]   = useState(null)
   const [props, setProps]   = useState(null)
   const [loading, setLoading] = useState(true)
@@ -412,10 +576,10 @@ function TabOverview({ schema, table, toast }) {
     setLoading(true)
     setStats(null); setProps(null)
     Promise.all([
-      api.getTableStats(schema, table).catch(() => null),
-      api.getTableProps(schema, table).catch(() => null),
+      api.getTableStats(schema, table, branch).catch(() => null),
+      api.getTableProps(schema, table, branch).catch(() => null),
     ]).then(([s, p]) => { setStats(s); setProps(p); setLoading(false) })
-  }, [schema, table])
+  }, [schema, table, branch])
 
   if (loading) return (
     <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 60 }}><LoadingDots /></div>
@@ -481,7 +645,7 @@ function TabOverview({ schema, table, toast }) {
 }
 
 // ── Tab: Schema ───────────────────────────────────────────────
-function TabSchema({ schema, table, toast }) {
+function TabSchema({ branch, schema, table, toast }) {
   const [columns, setColumns]     = useState([])
   const [loading, setLoading]     = useState(true)
   const [renaming, setRenaming]   = useState(null) // col name being renamed
@@ -493,11 +657,11 @@ function TabSchema({ schema, table, toast }) {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await api.describeTable(schema, table)
+      const data = await api.describeTable(schema, table, branch)
       setColumns(data.columns || [])
     } catch (e) { toast(e.message, 'error') }
     setLoading(false)
-  }, [schema, table])
+  }, [schema, table, branch])
 
   useEffect(() => { load() }, [load])
 
@@ -505,7 +669,7 @@ function TabSchema({ schema, table, toast }) {
     if (!renameVal.trim() || renameVal === oldName) { setRenaming(null); return }
     setBusy(true)
     try {
-      await api.alterTable(schema, table, { rename_column: { from: oldName, to: renameVal.trim() } })
+      await api.alterTable(schema, table, { rename_column: { from: oldName, to: renameVal.trim() } }, branch)
       toast(`Đã đổi tên column "${oldName}" → "${renameVal}"`)
       load()
     } catch (e) { toast(e.message, 'error') }
@@ -515,7 +679,7 @@ function TabSchema({ schema, table, toast }) {
   async function handleDrop(colName) {
     setBusy(true)
     try {
-      await api.alterTable(schema, table, { drop_columns: [colName] })
+      await api.alterTable(schema, table, { drop_columns: [colName] }, branch)
       toast(`Đã xóa column "${colName}"`)
       load()
     } catch (e) { toast(e.message, 'error') }
@@ -528,7 +692,7 @@ function TabSchema({ schema, table, toast }) {
     try {
       await api.alterTable(schema, table, {
         add_columns: [{ name: addForm.name.trim(), type: addForm.type, comment: addForm.comment }]
-      })
+      }, branch)
       toast(`Đã thêm column "${addForm.name}"`)
       setAddForm(null)
       load()
@@ -669,33 +833,136 @@ function TabSchema({ schema, table, toast }) {
 }
 
 // ── Tab: Preview ──────────────────────────────────────────────
-function TabPreview({ schema, table }) {
+function TabPreview({ branch, schema, table, toast, initialSnapshotId }) {
   const [data, setData]       = useState(null)
   const [loading, setLoading] = useState(true)
   const [limit, setLimit]     = useState(50)
-  const [snapshotId, setSnapshotId] = useState('')
+  const [snapshotId, setSnapshotId] = useState(initialSnapshotId || '')
   const [search, setSearch]   = useState('')
+  
+  const [newRows, setNewRows] = useState([])
+  const [submitting, setSubmitting] = useState(false)
 
-  useEffect(() => { load() }, [schema, table])
+  useEffect(() => { 
+    setSnapshotId(initialSnapshotId || '')
+    load(limit, initialSnapshotId || null) 
+  }, [schema, table, branch, initialSnapshotId])
 
   async function load(lim = limit, snap = null) {
     setLoading(true)
+    setNewRows([])
     try {
-      const res = await api.previewTable(schema, table, lim, snap || undefined)
+      const res = await api.previewTable(schema, table, lim, snap || undefined, branch)
       setData(res)
     } catch { setData(null) }
     setLoading(false)
+  }
+
+  function handleAddRow() {
+    if (!data?.columns) return
+    const row = {}
+    data.columns.forEach(c => row[c] = '')
+    setNewRows([row, ...newRows])
+  }
+
+  function handleUpdateNewRow(index, col, val) {
+    const list = [...newRows]
+    list[index][col] = val
+    setNewRows(list)
+  }
+
+  function handleRemoveNewRow(index) {
+    const list = [...newRows]
+    list.splice(index, 1)
+    setNewRows(list)
+  }
+
+  async function handleExecuteInsert() {
+    if (newRows.length === 0) return
+    setSubmitting(true)
+    try {
+      const payload = newRows.map(row => {
+        const parsed = {}
+        for (let k in row) {
+          let val = row[k]
+          if (val === '') {
+            parsed[k] = null
+            continue
+          }
+          if (typeof val === 'string' && val.includes('T') && val.includes('-') && val.includes(':')) {
+              // Convert built-in HTML5 datetime-local string (2024-01-01T12:00) into SQL string
+              val = val.replace('T', ' ');
+              // Add seconds if missing since some browsers only output HH:mm
+              if (val.split(':').length === 2) {
+                  val += ':00';
+              }
+          }
+          const typeInfo = data.column_details?.find(d => d.name === k)?.type || ''
+          if (typeInfo.includes('INT') || typeInfo.includes('DOUBLE') || typeInfo.includes('DECIMAL')) {
+            const num = Number(val)
+            parsed[k] = isNaN(num) ? val : num
+          } else if (typeInfo.includes('BOOLEAN')) {
+            parsed[k] = val === 'true' || val === '1'
+          } else {
+            parsed[k] = val
+          }
+        }
+        return parsed
+      })
+      await api.insertTableData(schema, table, { rows: payload }, branch)
+      setNewRows([])
+      load(limit)
+      toast && toast(`Đã chèn ${newRows.length} dòng thành công`, 'success')
+    } catch (e) {
+      let msg = e.message;
+      if (msg.includes('Cannot cast') || msg.includes('TYPE_MISMATCH')) {
+        msg = "Dữ liệu nhập bị sai định dạng Type (ví dụ chữ nhập vào ô số).";
+      } else if (msg.includes('not allow nulls')) {
+        msg = "Cột này bắt buộc phải điền giá trị (Not Null).";
+      } else if (msg.includes('date/time') || msg.includes('timestamp')) {
+         msg = "Thời gian sai format, xin kiểm tra lại.";
+      } else if (msg.includes('value is not acceptable')) {
+         msg = "Giá trị nhập vào không hợp lệ với cột.";
+      }
+      toast && toast("Lỗi: " + msg, 'error')
+    }
+    setSubmitting(false)
   }
 
   const filtered = data?.rows?.filter(row =>
     !search || Object.values(row).some(v => String(v ?? '').toLowerCase().includes(search.toLowerCase()))
   )
 
+  function getPlaceholder(type) {
+    if (!type) return '...'
+    if (type.includes('TIMESTAMP(6)')) return 'YYYY-MM-DD HH:mm:ss.SSSSSS'
+    if (type.includes('TIMESTAMP')) return 'YYYY-MM-DD HH:mm:ss'
+    if (type.includes('DATE')) return 'YYYY-MM-DD'
+    if (type.includes('DECIMAL') || type.includes('DOUBLE')) return '0.00'
+    if (type.includes('INT')) return '123'
+    if (type.includes('BOOLEAN')) return 'true/false'
+    return type
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%' }}>
       {/* Controls */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <div style={{ position: 'relative', flex: '0 0 200px' }}>
+        <button className="btn btn-primary btn-sm" onClick={handleAddRow} disabled={!data?.columns}>
+          <Plus size={13} /> + Thêm Dòng
+        </button>
+        {newRows.length > 0 && (
+          <button className="btn btn-primary btn-sm" style={{ background: 'var(--success)', borderColor: 'var(--success)' }} onClick={handleExecuteInsert} disabled={submitting}>
+            {submitting ? <LoadingDots /> : <><CheckCheck size={13} /> Lưu {newRows.length} dòng</>}
+          </button>
+        )}
+        {newRows.length > 0 && (
+          <button className="btn btn-secondary btn-sm" onClick={() => setNewRows([])}>
+            Hủy
+          </button>
+        )}
+      
+        <div style={{ position: 'relative', flex: '0 0 200px', marginLeft: 16 }}>
           <Search size={13} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input
             className="form-input"
@@ -743,14 +1010,71 @@ function TabPreview({ schema, table }) {
           <table className="data-grid">
             <thead>
               <tr>
-                <th style={{ width: 48, color: 'var(--text-muted)' }}>#</th>
-                {data.columns.map(c => <th key={c}>{c}</th>)}
+                <th style={{ width: 48, color: 'var(--text-muted)', textAlign: 'center' }}>
+                  <Zap size={13} style={{ color: 'var(--text-muted)' }} />
+                </th>
+                {data.columns.map(c => {
+                  const typeInfo = data.column_details?.find(d => d.name === c)?.type;
+                  return (
+                    <th key={c}>
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <span>{c}</span>
+                        {typeInfo && <span style={{ fontSize: 10, color: 'var(--primary)', fontWeight: 'normal', marginTop: 2 }}>{typeInfo}</span>}
+                      </div>
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
+              {/* Render New Rows for Editing at the TOP */}
+              {newRows.map((row, i) => (
+                <tr key={`new-${i}`} style={{ background: 'var(--bg-card)', boxShadow: 'inset 0 0 0 1px rgba(99, 102, 241, 0.2)' }}>
+                  <td style={{ textAlign: 'center' }}>
+                    <button className="btn btn-secondary btn-sm" style={{ padding: '4px', background: 'transparent', border: 'none', color: 'var(--text-muted)' }} onClick={() => handleRemoveNewRow(i)} title="Hủy dòng này">
+                      <Trash2 size={13} />
+                    </button>
+                  </td>
+                  {data.columns.map(c => {
+                    const typeInfo = data.column_details?.find(d => d.name === c)?.type || '';
+                    return (
+                      <td key={`new-${i}-${c}`} style={{ padding: 4 }}>
+                        {(() => {
+                          let inputType = 'text';
+                          let stepStr = undefined;
+                          if (typeInfo.includes('TIMESTAMP')) {
+                             inputType = 'datetime-local';
+                             stepStr = "0.000001"; // support microseconds
+                          } else if (typeInfo.includes('DATE')) {
+                             inputType = 'date';
+                          } else if (typeInfo.includes('INT') || typeInfo.includes('DECIMAL') || typeInfo.includes('DOUBLE')) {
+                             inputType = 'number';
+                             if (typeInfo.includes('DECIMAL') || typeInfo.includes('DOUBLE')) stepStr = "any";
+                          }
+                          return (
+                            <input
+                              className="form-input"
+                              type={inputType}
+                              step={stepStr}
+                              style={{ width: '100%', height: '28px', fontSize: 12, borderRadius: 4, background: 'var(--bg-body)' }}
+                              value={row[c] || ''}
+                              placeholder={getPlaceholder(typeInfo)}
+                              title={`Type: ${typeInfo}`}
+                              autoComplete="off"
+                              onChange={e => handleUpdateNewRow(i, c, e.target.value)}
+                            />
+                          )
+                        })()}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+              
+              {/* Existing Data */}
               {(filtered || data.rows).map((row, i) => (
-                <tr key={i}>
-                  <td style={{ color: 'var(--text-muted)', fontSize: 11 }}>{i + 1}</td>
+                <tr key={`old-${i}`}>
+                  <td style={{ color: 'var(--text-muted)', fontSize: 11, textAlign: 'center' }}>{i + 1}</td>
                   {data.columns.map(c => (
                     <td key={c}>
                       {row[c] === null || row[c] === undefined
@@ -770,17 +1094,47 @@ function TabPreview({ schema, table }) {
 }
 
 // ── Tab: Snapshots ────────────────────────────────────────────
-function TabSnapshots({ schema, table, onTimeTravelPreview }) {
+function TabSnapshots({ branch, schema, table, onTimeTravelPreview, toast, confirm }) {
   const [snaps, setSnaps]     = useState([])
+  const [currId, setCurrId]   = useState('')
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
+  async function loadData() {
     setLoading(true)
-    api.getSnapshots(schema, table)
-      .then(d => setSnaps(d.snapshots || []))
-      .catch(() => setSnaps([]))
-      .finally(() => setLoading(false))
-  }, [schema, table])
+    try {
+      const d = await api.getSnapshots(schema, table, branch)
+      setSnaps(d.snapshots || [])
+      setCurrId(d.current_snapshot_id || '')
+    } catch {
+      setSnaps([])
+    }
+    setLoading(false)
+  }
+
+  async function handleRollback(snapId) {
+    confirm({
+       title: "Khôi phục Snapshot",
+       message: `Bạn đang chuẩn bị khôi phục bảng dữ liệu này quay trở về thời điểm của Snapshot ID #${String(snapId).slice(-8)}. Các dữ liệu sinh ra sau mốc này sẽ bị ẩn đi. Dữ liệu quay trở về trạng thái mốc đã chọn.`,
+       confirmText: "Xác nhận khôi phục",
+       onConfirm: async () => {
+         confirm(null);
+         try {
+           toast && toast(`Đang tiến hành Time Travel...`, 'success');
+           await api.rollbackToSnapshot(schema, table, snapId, branch);
+           toast && toast(`[Thành công] Đã khôi phục về snapshot ${snapId}`, 'success');
+           setLoading(true);
+           loadData();
+         } catch (e) {
+           toast && toast(`Lỗi khôi phục (Trino): ${e.message}`, 'error');
+         }
+       },
+       onCancel: () => confirm(null)
+    })
+  }
+
+  useEffect(() => {
+    loadData()
+  }, [schema, table, branch])
 
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 60 }}><LoadingDots /></div>
 
@@ -819,6 +1173,11 @@ function TabSnapshots({ schema, table, onTimeTravelPreview }) {
               <div className={`snapshot-dot ${opColor(s.operation)}`} />
               <div className="snapshot-content">
                 <div className="snapshot-header">
+                  {s.snapshot_id === currId && (
+                    <span className="badge badge-primary" style={{ fontSize: 10, background: 'var(--primary)', color: '#fff' }}>
+                      CURRENT
+                    </span>
+                  )}
                   {s.operation && (
                     <span className={`badge ${opBadge(s.operation)}`} style={{ fontSize: 10 }}>
                       {s.operation}
@@ -832,11 +1191,30 @@ function TabSnapshots({ schema, table, onTimeTravelPreview }) {
                       style={{ padding: '2px 8px', fontSize: 11 }}
                       onClick={() => {
                         navigator.clipboard.writeText(String(s.snapshot_id))
+                        toast && toast(`Đã copy ID: ${s.snapshot_id}`, 'success')
                       }}
                       title="Copy snapshot ID"
                     >
                       <Copy size={11} /> ID
                     </button>
+                    {s.snapshot_id !== currId && (
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        style={{ padding: '2px 8px', fontSize: 11, background: 'var(--bg-card)', color: 'var(--warning)', borderColor: 'var(--warning)' }}
+                        onClick={() => handleRollback(s.snapshot_id)}
+                        title="Khôi phục bảng về snapshot này"
+                      >
+                        <RefreshCw size={11} /> Khôi phục
+                      </button>
+                    )}
+                    <button
+                        className="btn btn-secondary btn-sm"
+                        style={{ padding: '2px 8px', fontSize: 11, background: 'var(--bg-card)', color: 'var(--primary)', borderColor: 'var(--primary)' }}
+                        onClick={() => onTimeTravelPreview(s.snapshot_id)}
+                        title="Xem dữ liệu tại mốc thời gian này"
+                      >
+                        <Eye size={11} /> Xem
+                      </button>
                   </div>
                 </div>
                 {Object.keys(summary).length > 0 && (
@@ -858,18 +1236,18 @@ function TabSnapshots({ schema, table, onTimeTravelPreview }) {
 }
 
 // ── Tab: DDL ──────────────────────────────────────────────────
-function TabDDL({ schema, table, toast }) {
+function TabDDL({ branch, schema, table, toast }) {
   const [ddl, setDdl]         = useState('')
   const [loading, setLoading] = useState(true)
   const [copied, setCopied]   = useState(false)
 
   useEffect(() => {
     setLoading(true)
-    api.getTableProps(schema, table)
+    api.getTableProps(schema, table, branch)
       .then(d => setDdl(d.ddl || ''))
       .catch(() => setDdl('-- Không thể lấy DDL'))
       .finally(() => setLoading(false))
-  }, [schema, table])
+  }, [schema, table, branch])
 
   function copyDDL() {
     navigator.clipboard.writeText(ddl)
@@ -898,7 +1276,7 @@ function TabDDL({ schema, table, toast }) {
 }
 
 // ── Modal: Create Schema ──────────────────────────────────────
-function CreateSchemaModal({ onClose, onSuccess, onError }) {
+function CreateSchemaModal({ branch, onClose, onSuccess, onError }) {
   const [name, setName]     = useState('')
   const [loc, setLoc]       = useState('')
   const [loading, setLoading] = useState(false)
@@ -950,7 +1328,7 @@ function CreateSchemaModal({ onClose, onSuccess, onError }) {
 }
 
 // ── Wizard: Create Table (3 steps) ───────────────────────────
-function CreateTableWizard({ schemas, defaultSchema, onClose, onSuccess, onError }) {
+function CreateTableWizard({ branch, schemas, defaultSchema, onClose, onSuccess, onError }) {
   const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
 
@@ -1019,7 +1397,7 @@ function CreateTableWizard({ schemas, defaultSchema, onClose, onSuccess, onError
           ? adv.sort_by.split(',').map(s => s.trim()).filter(Boolean)
           : undefined,
       }
-      await api.createTable(payload)
+      await api.createTable(payload, branch)
       onSuccess(info.schema_name, info.table_name.trim())
     } catch (e) { onError(e.message) }
     setLoading(false)
@@ -1214,3 +1592,4 @@ function CreateTableWizard({ schemas, defaultSchema, onClose, onSuccess, onError
     </div>
   )
 }
+

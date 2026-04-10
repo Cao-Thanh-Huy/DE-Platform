@@ -20,27 +20,37 @@ async function request(url, options = {}) {
 export const checkHealth = () => request('/health');
 
 // ── Data Models — Schemas ───────
-export const getSchemas    = ()           => request('/models/schemas');
-export const createSchema  = (data)       => request('/models/schemas', { method: 'POST', body: JSON.stringify(data) });
-export const dropSchema    = (name)       => request(`/models/schemas/${name}`, { method: 'DELETE' });
+export const getSchemas    = (branch='main')           => request(`/models/schemas?branch=${encodeURIComponent(branch)}`);
+export const createSchema  = (data, branch='main')     => request(`/models/schemas?branch=${encodeURIComponent(branch)}`, { method: 'POST', body: JSON.stringify(data) });
+export const dropSchema    = (name, branch='main')     => request(`/models/schemas/${name}?branch=${encodeURIComponent(branch)}`, { method: 'DELETE' });
 
 // ── Data Models — Tables ────────
-export const getTables     = (schema)     => request(`/models/tables/${schema}`);
-export const createTable   = (data)       => request('/models/tables', { method: 'POST', body: JSON.stringify(data) });
-export const dropTable     = (schema, table) => request(`/models/tables/${schema}/${table}`, { method: 'DELETE' });
-export const renameTable   = (schema, table, data) => request(`/models/tables/${schema}/${table}/rename`, { method: 'POST', body: JSON.stringify(data) });
+export const getTables     = (schema, branch='main')     => request(`/models/tables/${schema}?branch=${encodeURIComponent(branch)}`);
+export const createTable   = (data, branch='main')       => request(`/models/tables?branch=${encodeURIComponent(branch)}`, { method: 'POST', body: JSON.stringify(data) });
+export const dropTable     = (schema, table, branch='main') => request(`/models/tables/${schema}/${table}?branch=${encodeURIComponent(branch)}`, { method: 'DELETE' });
+export const renameTable   = (schema, table, data, branch='main') => request(`/models/tables/${schema}/${table}/rename?branch=${encodeURIComponent(branch)}`, { method: 'POST', body: JSON.stringify(data) });
 
 // ── Data Models — Table Detail ──
-export const describeTable    = (schema, table)           => request(`/models/tables/${schema}/${table}/columns`);
-export const getTableProps    = (schema, table)           => request(`/models/tables/${schema}/${table}/properties`);
-export const getTableStats    = (schema, table)           => request(`/models/tables/${schema}/${table}/stats`);
-export const previewTable     = (schema, table, limit=50, snapshotId=null) => {
-  let url = `/models/tables/${schema}/${table}/preview?limit=${limit}`;
+export const describeTable    = (schema, table, branch='main')           => request(`/models/tables/${schema}/${table}/columns?branch=${encodeURIComponent(branch)}`);
+export const getTableProps    = (schema, table, branch='main')           => request(`/models/tables/${schema}/${table}/properties?branch=${encodeURIComponent(branch)}`);
+export const getTableStats    = (schema, table, branch='main')           => request(`/models/tables/${schema}/${table}/stats?branch=${encodeURIComponent(branch)}`);
+export const previewTable     = (schema, table, limit=50, snapshotId=null, branch='main') => {
+  let url = `/models/tables/${schema}/${table}/preview?limit=${limit}&branch=${encodeURIComponent(branch)}`;
   if (snapshotId) url += `&snapshot_id=${snapshotId}`;
   return request(url);
 };
-export const getSnapshots     = (schema, table)           => request(`/models/tables/${schema}/${table}/snapshots`);
-export const alterTable       = (schema, table, data)     => request(`/models/tables/${schema}/${table}/alter`, { method: 'POST', body: JSON.stringify(data) });
+export const getSnapshots     = (schema, table, branch='main')           => request(`/models/tables/${schema}/${table}/snapshots?branch=${encodeURIComponent(branch)}`);
+export const alterTable       = (schema, table, data, branch='main')     => request(`/models/tables/${schema}/${table}/alter?branch=${encodeURIComponent(branch)}`, { method: 'POST', body: JSON.stringify(data) });
+export const rollbackToSnapshot = (schema, table, snapshot_id, branch='main') =>
+    request(`/models/tables/${schema}/${table}/rollback?branch=${encodeURIComponent(branch)}`, { method: 'POST', body: JSON.stringify({ snapshot_id }) });
+
+export const optimizeTable = (schema, table, branch='main') =>
+    request(`/models/tables/${schema}/${table}/optimize`, { method: 'POST', body: JSON.stringify({ branch }) });
+
+export const vacuumTable = (schema, table, retention_threshold='7d', retain_last=1, branch='main') =>
+    request(`/models/tables/${schema}/${table}/vacuum`, { method: 'POST', body: JSON.stringify({ branch, retention_threshold, retain_last }) });
+
+export const insertTableData  = (schema, table, data, branch='main')     => request(`/models/tables/${schema}/${table}/insert?branch=${encodeURIComponent(branch)}`, { method: 'POST', body: JSON.stringify(data) });
 
 // ── Pipelines ───────────────────
 export const listPipelines    = ()        => request('/pipelines/');

@@ -6,13 +6,18 @@ from app.config import settings
 
 
 class TrinoService:
-    def __init__(self, catalog: str = None, schema: str = None):
+    def __init__(self, catalog: str = None, schema: str = None, branch: str = None):
+        session_props = {}
+        if branch and branch != "main":
+            session_props["iceberg.nessie_reference_name"] = branch
+            
         self.conn = trino.dbapi.connect(
             host=settings.trino_host,
             port=settings.trino_port,
             user=settings.trino_user,
             catalog=catalog or settings.trino_catalog,
             schema=schema or settings.trino_schema,
+            session_properties=session_props if session_props else None,
         )
         self._cursor = None
 
