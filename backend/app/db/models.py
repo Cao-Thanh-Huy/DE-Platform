@@ -81,6 +81,7 @@ class PipelineRun(Base):
         default="manual", nullable=False,
     )
     dagster_run_id  = Column(String(255), nullable=True, index=True)
+    branch_name     = Column(String(255), nullable=True)     # NEW: branch used for execution
     error_message   = Column(Text, nullable=True)
     created_at      = Column(DateTime(timezone=True), default=now_utc, nullable=False)
 

@@ -11,7 +11,8 @@ class TrinoService:
     def __init__(self, catalog: str = None, schema: str = None, branch: str = None):
         session_props = {}
         if branch and branch != "main":
-            session_props["iceberg.nessie_reference_name"] = branch
+            # NOTE: Trino 480 Iceberg connector doesn't support session properties for nessie references.
+            pass
 
         self.conn = trino.dbapi.connect(
             host=settings.trino_host,
@@ -75,6 +76,14 @@ class TrinoService:
 
         self._cursor = cursor
         return query_id, rows_affected
+
+    def drop_catalog(self, catalog_name: str):
+        """Xóa catalog dynamic nếu tồn tại."""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(f"DROP CATALOG IF EXISTS {catalog_name}")
+        except Exception:
+            pass
 
     # ── Schema Introspection ──────────────────────────────────────────────────
 

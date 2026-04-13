@@ -28,6 +28,7 @@ class DagsterService:
         run_id: str,
         version: int,
         pipeline_name: str,
+        branch_name: str | None = None,
     ) -> str:
         """
         Trigger the generic 'pipeline_runner' job with pipeline metadata as tags.
@@ -75,6 +76,9 @@ class DagsterService:
             {"key": "pipeline_name", "value": pipeline_name},
             {"key": "source", "value": "de-studio"},
         ]
+        if branch_name:
+            tags.append({"key": "branch_name", "value": branch_name})
+            
         data = await self._query(query, {"tags": tags})
         launch = data.get("launchRun", {})
         if launch.get("__typename") == "LaunchRunSuccess":

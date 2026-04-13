@@ -51,6 +51,13 @@ async def delete_branch(name: str):
     svc = NessieService()
     try:
         await svc.delete_branch(name)
+        # Đồng thời dọn dẹp dynamic catalog trên Trino (nếu do pipeline tạo ra)
+        try:
+            from app.services.trino_service import TrinoService
+            catalog_name = f"ctlg_{name.replace('-', '_')}"
+            TrinoService().drop_catalog(catalog_name)
+        except Exception:
+            pass
         return {"message": f"Branch '{name}' đã được xóa"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -20,6 +20,7 @@ def execute_pipeline_op(context: OpExecutionContext):
     run_id = tags.get("run_id")
     version = int(tags.get("version", "0"))
     pipeline_name = tags.get("pipeline_name", "unknown")
+    branch_name = tags.get("branch_name")
     dagster_run_id = context.run.run_id
 
     context.log.info(f"▶ Starting pipeline '{pipeline_name}' (id={pipeline_id}, version={version})")
@@ -57,7 +58,9 @@ def execute_pipeline_op(context: OpExecutionContext):
     rows_affected = 0
 
     try:
-        query_id, rows_affected = context.resources.trino.execute_with_tracking(compiled_sql)
+        query_id, rows_affected = context.resources.trino.execute_with_tracking(
+            compiled_sql, branch=branch_name
+        )
         context.log.info(f"✅ Execution complete. query_id={query_id}, rows={rows_affected}")
     except Exception as e:
         context.log.error(f"❌ Trino execution failed: {e}")

@@ -18,15 +18,48 @@ BACKEND_URL = os.getenv("BACKEND_API_URL", "http://backend:8000")
 
 class TrinoClient:
     def __init__(self, host: str, port: int, user: str):
-        self.conn = trino.dbapi.connect(
-            host=host,
-            port=port,
-            user=user,
-            catalog="iceberg",
-        )
+        self.host = host
+        self.port = port
+        self.user = user
 
-    def execute_with_tracking(self, sql: str) -> tuple[str | None, int]:
-        cursor = self.conn.cursor()
+    def execute_with_tracking(self, sql: str, branch: str = None) -> tuple[str | None, int]:
+        catalog_name = "iceberg"
+        if branch and branch != "main":
+            # Trino 480 doesn't support session properties for nessie references.
+            # Instead, we dynamically create a catalog for this specific branch.
+            catalog_name = f"ctlg_{branch.replace('-', '_')}"
+            create_catalog_sql = f"""
+            CREATE CATALOG IF NOT EXISTS {catalog_name} USING iceberg WITH (
+                "iceberg.catalog.type" = 'nessie',
+                "iceberg.nessie-catalog.uri" = 'http://nessie:19120/api/v2',
+                "iceberg.nessie-catalog.ref" = '{branch}',
+                "iceberg.nessie-catalog.default-warehouse-dir" = 's3a://warehouse/',
+                "fs.native-s3.enabled" = 'true',
+                "s3.endpoint" = 'http://minio:9000',
+                "s3.region" = 'us-east-1',
+                "s3.path-style-access" = 'true',
+                "s3.aws-access-key" = 'admin',
+                "s3.aws-secret-key" = 'minio123456',
+                "iceberg.file-format" = 'PARQUET'
+            )
+            """
+            try:
+                # Need a separate connection to run CREATE CATALOG without session catalog context restricting it
+                with trino.dbapi.connect(host=self.host, port=self.port, user=self.user) as tmp_conn:
+                    tmp_conn.cursor().execute(create_catalog_sql)
+            except Exception as e:
+                pass # Proceed anyway
+                
+            import re
+            sql = re.sub(r'\biceberg\b\.', f"{catalog_name}.", sql)
+
+        conn = trino.dbapi.connect(
+            host=self.host,
+            port=self.port,
+            user=self.user,
+            catalog=catalog_name,
+        )
+        cursor = conn.cursor()
         cursor.execute(sql)
 
         query_id: str | None = None

@@ -20,9 +20,11 @@ from app.db.models import Pipeline, PipelineVersion, PipelineRun, TaskRun, Pipel
 from app.services.dag_service import DAGService
 from app.services.dagster_service import DagsterService
 from app.services.trino_service import TrinoService
+from app.services.nessie_service import NessieService
 
 router = APIRouter()
 dag_service = DAGService()
+nessie_service = NessieService()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -116,6 +118,7 @@ def _run_to_dict(r: PipelineRun, include_tasks: bool = False) -> dict:
         "ended_at": r.ended_at.isoformat() if r.ended_at else None,
         "triggered_by": r.triggered_by,
         "dagster_run_id": r.dagster_run_id,
+        "branch_name": r.branch_name,
         "error_message": r.error_message,
         "created_at": r.created_at.isoformat() if r.created_at else None,
     }
@@ -518,6 +521,18 @@ async def trigger_run(
     db.add(run)
     await db.flush()
 
+    # Generate branch name and create Nessie branch 
+    import re
+    import time
+    safe_name = re.sub(r'[^a-zA-Z0-9]+', '_', pipeline.name).strip('_').lower()
+    branch_name = f"pipeline_{int(time.time())}_{safe_name}_run_{str(run.id).replace('-', '')[:8]}"
+    try:
+        await nessie_service.create_branch(branch_name, source_branch="main")
+        run.branch_name = branch_name
+        await db.flush()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi tạo Nessie branch: {e}")
+
     # Trigger Dagster generic job
     dagster = DagsterService()
     dagster_run_id = None
@@ -527,6 +542,7 @@ async def trigger_run(
             run_id=str(run.id),
             version=run_version,
             pipeline_name=pipeline.name,
+            branch_name=branch_name,
         )
         run.dagster_run_id = dagster_run_id
         run.status = "running"
@@ -538,7 +554,7 @@ async def trigger_run(
             run.started_at = datetime.now(timezone.utc)
             await db.flush()
 
-            trino = TrinoService()
+            trino = TrinoService(branch=branch_name)
             query_id, rows = trino.execute_with_tracking(pipeline_version.compiled_sql)
 
             task = TaskRun(
@@ -561,6 +577,17 @@ async def trigger_run(
             run.status = "failed"
             run.ended_at = datetime.now(timezone.utc)
             run.error_message = str(exec_err)
+            
+            # Clean up branch manually on fallback fail
+            try:
+                await nessie_service.delete_branch(branch_name)
+                try:
+                    from app.services.trino_service import TrinoService
+                    TrinoService().drop_catalog(f"ctlg_{branch_name.replace('-', '_')}")
+                except Exception: pass
+            except Exception as clean_err:
+                import logging
+                logging.getLogger("de.main").error(f"Cannot delete failed branch {branch_name}: {clean_err}")
 
     return {
         "message": f"Pipeline '{pipeline.name}' đang chạy",
@@ -771,6 +798,19 @@ async def update_run_status(
         run.error_message = req.error_message
     if req.status in ("success", "failed", "cancelled"):
         run.ended_at = datetime.now(timezone.utc)
+        
+        # If failed/cancelled, clean up the branch immediately
+        if req.status in ("failed", "cancelled") and run.branch_name:
+            try:
+                await nessie_service.delete_branch(run.branch_name)
+                try:
+                    from app.services.trino_service import TrinoService
+                    TrinoService().drop_catalog(f"ctlg_{run.branch_name.replace('-', '_')}")
+                except Exception: pass
+            except Exception as e:
+                import logging
+                logging.getLogger("de.main").error(f"Cannot delete failed branch {run.branch_name}: {e}")
+                
     if req.status == "running" and not run.started_at:
         run.started_at = datetime.now(timezone.utc)
 
