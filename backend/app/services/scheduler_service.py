@@ -1,24 +1,25 @@
 """
 DE Platform — Pipeline Scheduler Service
 APScheduler-based background scheduler embedded in FastAPI.
-Runs every 60s, polls pipeline_schedule table, triggers due pipelines via internal DB call.
+Runs every 60s, polls pipeline_schedule table, triggers due pipelines.
 
 Design:
-  - run_type='scheduled': croniter evaluates cron expression against [last_check, now] window
+  - run_type='scheduled': croniter evaluates cron expression against [last_triggered_at, now] window
   - run_type='onetime':   triggers if now >= run_at and not yet triggered (last_triggered_at is None)
-  - Inserts a PipelineRun + executes Trino SQL directly (no HTTP round-trip to self)
-  - Updates last_triggered_at after successful trigger
+  - Executes Trino SQL directly (no HTTP round-trip to self)
+  - Updates last_triggered_at IMMEDIATELY in tick session (before async task)
   - Disables one-time schedules after firing
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+import uuid
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from croniter import croniter
-from sqlalchemy import select, text
+from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 
 from app.db.database import AsyncSessionLocal
@@ -28,19 +29,22 @@ from app.services.trino_service import TrinoService
 log = logging.getLogger("de.scheduler")
 
 
-async def _trigger_pipeline(
-    pipeline: Pipeline,
-    schedule: PipelineSchedule,
-    version: PipelineVersion,
+async def _execute_pipeline_run(
+    pipeline_id: uuid.UUID,
+    pipeline_name: str,
+    schedule_id: uuid.UUID,
+    version_id: uuid.UUID,
+    run_type: str,
+    version_num: int,
+    compiled_sql: str,
 ) -> None:
-    """Execute one pipeline run via Trino (direct DB, no HTTP loop)."""
+    """Execute one pipeline run in a fresh DB session."""
     async with AsyncSessionLocal() as session:
         now = datetime.now(timezone.utc)
 
-        # Create run record
         run = PipelineRun(
-            pipeline_id=pipeline.id,
-            version=version.version,
+            pipeline_id=pipeline_id,
+            version=version_num,
             status="running",
             triggered_by="schedule",
             started_at=now,
@@ -50,7 +54,7 @@ async def _trigger_pipeline(
 
         try:
             trino = TrinoService()
-            query_id, rows = trino.execute_with_tracking(version.compiled_sql)
+            query_id, rows = trino.execute_with_tracking(compiled_sql)
 
             task = TaskRun(
                 pipeline_run_id=run.id,
@@ -62,55 +66,60 @@ async def _trigger_pipeline(
                 ended_at=datetime.now(timezone.utc),
                 trino_query_id=query_id,
                 rows_affected=rows,
-                compiled_sql=version.compiled_sql,
+                compiled_sql=compiled_sql,
             )
             session.add(task)
             run.status = "success"
+            log.info(
+                f"[scheduler] ✅ '{pipeline_name}' success — "
+                f"run={str(run.id)[:8]}, rows={rows}"
+            )
         except Exception as e:
-            log.error(f"[scheduler] Pipeline '{pipeline.name}' run failed: {e}")
+            log.error(f"[scheduler] ❌ '{pipeline_name}' run failed: {e}")
             run.status = "failed"
             run.error_message = str(e)
 
         run.ended_at = datetime.now(timezone.utc)
 
-        # Update last_triggered_at
-        schedule.last_triggered_at = now
-
         # Disable one-time schedule after firing
-        if schedule.run_type == "onetime":
-            schedule.enabled = False
-            log.info(f"[scheduler] One-time schedule for '{pipeline.name}' disabled after firing")
+        if run_type == "onetime":
+            await session.execute(
+                update(PipelineSchedule)
+                .where(PipelineSchedule.id == schedule_id)
+                .values(enabled=False)
+            )
+            log.info(f"[scheduler] 📅 '{pipeline_name}' one-time schedule disabled")
 
         await session.commit()
-        log.info(
-            f"[scheduler] ✅ Pipeline '{pipeline.name}' triggered — "
-            f"status={run.status}, rows={getattr(task, 'rows_affected', None) if run.status == 'success' else 'N/A'}"
-        )
 
 
 async def _check_and_trigger_schedules() -> None:
     """
     Core scheduler tick — runs every 60s.
-    Evaluates all enabled schedules and triggers due pipelines.
+    Evaluates all enabled schedules and triggers pipelines that are due.
+    Updates last_triggered_at in the SAME session before launching async tasks.
     """
     now = datetime.now(timezone.utc)
-    log.debug(f"[scheduler] Tick at {now.isoformat()}")
+    log.info(f"[scheduler] ⏰ Tick at {now.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+
+    tasks_to_launch: list[dict] = []
 
     try:
         async with AsyncSessionLocal() as session:
-            # Fetch all enabled schedules for active, enabled pipelines
             result = await session.execute(
                 select(PipelineSchedule)
                 .join(Pipeline, Pipeline.id == PipelineSchedule.pipeline_id)
                 .where(
-                    PipelineSchedule.enabled == True,
-                    Pipeline.is_enabled == True,
+                    PipelineSchedule.enabled == True,      # noqa: E712
+                    Pipeline.is_enabled == True,           # noqa: E712
                     Pipeline.status == "active",
                     Pipeline.latest_version > 0,
                 )
                 .options(selectinload(PipelineSchedule.pipeline))
             )
             schedules = result.scalars().all()
+
+            log.info(f"[scheduler] Found {len(schedules)} active enabled schedules")
 
             for schedule in schedules:
                 pipeline = schedule.pipeline
@@ -122,20 +131,21 @@ async def _check_and_trigger_schedules() -> None:
                     if not schedule.cron_expr:
                         continue
 
-                    # Determine the check window start
+                    # Window start: last triggered or 120s ago (safe fallback)
                     if schedule.last_triggered_at:
                         window_start = schedule.last_triggered_at
+                        # Ensure tz-aware
+                        if window_start.tzinfo is None:
+                            window_start = window_start.replace(tzinfo=timezone.utc)
                     else:
-                        # Never triggered before — check last 60s window
-                        from datetime import timedelta
-                        window_start = datetime.fromtimestamp(now.timestamp() - 60, tz=timezone.utc)
+                        window_start = now - timedelta(seconds=120)
 
                     try:
                         cron = croniter(schedule.cron_expr, window_start)
                         next_run = cron.get_next(datetime)
                         if next_run <= now:
                             should_fire = True
-                            reason = f"cron '{schedule.cron_expr}' → next={next_run.strftime('%H:%M:%S')}"
+                            reason = f"cron '{schedule.cron_expr}' → fired at {next_run.strftime('%H:%M:%S')}"
                     except Exception as e:
                         log.warning(f"[scheduler] Invalid cron for '{pipeline.name}': {e}")
                         continue
@@ -147,16 +157,15 @@ async def _check_and_trigger_schedules() -> None:
                     run_at = schedule.run_at
                     if run_at.tzinfo is None:
                         run_at = run_at.replace(tzinfo=timezone.utc)
-
-                    # Only fire if not already triggered
+                    # Only fire if time passed AND never triggered
                     if now >= run_at and schedule.last_triggered_at is None:
                         should_fire = True
-                        reason = f"one-time run_at={run_at.isoformat()}"
+                        reason = f"one-time run_at={run_at.strftime('%Y-%m-%d %H:%M:%S')}"
 
                 if not should_fire:
                     continue
 
-                # ── Fetch the pipeline version ───────────────────────────────
+                # ── Fetch compiled version ─────────────────────────────────
                 ver_result = await session.execute(
                     select(PipelineVersion).where(
                         PipelineVersion.pipeline_id == pipeline.id,
@@ -164,18 +173,41 @@ async def _check_and_trigger_schedules() -> None:
                     )
                 )
                 ver = ver_result.scalar_one_or_none()
-
                 if not ver or not ver.compiled_sql:
-                    log.warning(f"[scheduler] '{pipeline.name}' has no compiled SQL for v{pipeline.latest_version} — skip")
+                    log.warning(f"[scheduler] '{pipeline.name}' v{pipeline.latest_version} has no SQL — skip")
                     continue
 
-                log.info(f"[scheduler] ⏰ Firing pipeline '{pipeline.name}' — {reason}")
+                log.info(f"[scheduler] 🚀 Firing '{pipeline.name}' — {reason}")
 
-                # Trigger async (non-blocking) so scheduler tick doesn't block
-                asyncio.create_task(_trigger_pipeline(pipeline, schedule, ver))
+                # ✅ Update last_triggered_at NOW, in same session, before async task
+                schedule.last_triggered_at = now
+
+                # Collect task info (avoid passing detached ORM objects)
+                tasks_to_launch.append({
+                    "pipeline_id":   pipeline.id,
+                    "pipeline_name": pipeline.name,
+                    "schedule_id":   schedule.id,
+                    "version_id":    ver.id,
+                    "run_type":      schedule.run_type,
+                    "version_num":   ver.version,
+                    "compiled_sql":  ver.compiled_sql,
+                })
+
+            # Commit last_triggered_at updates for all pipelines in this tick
+            if tasks_to_launch:
+                await session.commit()
+                log.info(f"[scheduler] Updated last_triggered_at for {len(tasks_to_launch)} pipeline(s)")
 
     except Exception as e:
         log.error(f"[scheduler] Tick error: {e}", exc_info=True)
+        return
+
+    # Launch execution tasks AFTER the session is closed (fresh sessions per task)
+    for task_info in tasks_to_launch:
+        asyncio.create_task(_execute_pipeline_run(**task_info))
+
+    if not tasks_to_launch:
+        log.info("[scheduler] No pipelines due this tick")
 
 
 # ── APScheduler setup ─────────────────────────────────────────────────────────

@@ -503,6 +503,9 @@ async def vacuum_table(schema_name: str, table_name: str, req: VacuumRequest):
     """Thực hiện Expire Snapshots dọn dẹp lịch sử cho Bảng Iceberg."""
     svc = TrinoService(branch=req.branch)
     try:
+        # Cho phép user xóa sạch snapshot bất chấp giới hạn an toàn 48h của Trino
+        svc.execute("SET SESSION iceberg.expire_snapshots_min_retention = '0s'")
+        
         query = f'ALTER TABLE "iceberg"."{schema_name}"."{table_name}" EXECUTE expire_snapshots(retention_threshold => \'{req.retention_threshold}\', retain_last => {req.retain_last})'
         svc.execute(query)
         return {"status": "success", "message": "Dọn dẹp snapshot cũ thành công."}

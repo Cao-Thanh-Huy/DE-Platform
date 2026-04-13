@@ -3,6 +3,7 @@ DE Platform — FastAPI Backend
 Entry point: cung cấp REST API cho DE Studio frontend.
 """
 import logging
+import logging.config
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -11,6 +12,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routers import models, pipelines, nessie, query, storage, maintenance
 from app.db.database import init_db
 from app.services.scheduler_service import start_scheduler, stop_scheduler
+
+# ── Logging config — show scheduler, dagster INFO ─────────────────────────────
+logging.config.dictConfig({
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "default": {"format": "%(asctime)s %(levelname)-8s %(name)s — %(message)s"},
+    },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "formatter": "default"},
+    },
+    "loggers": {
+        "de": {"level": "INFO", "handlers": ["console"], "propagate": False},
+    },
+    "root": {"level": "WARNING", "handlers": ["console"]},
+})
 
 log = logging.getLogger("de.main")
 
