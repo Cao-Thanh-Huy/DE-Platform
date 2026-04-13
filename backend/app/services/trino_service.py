@@ -9,24 +9,53 @@ from app.config import settings
 
 class TrinoService:
     def __init__(self, catalog: str = None, schema: str = None, branch: str = None):
-        session_props = {}
+        self.original_catalog = catalog or settings.trino_catalog
+        self.catalog_name = self.original_catalog
+        
         if branch and branch != "main":
-            # NOTE: Trino 480 Iceberg connector doesn't support session properties for nessie references.
-            pass
+            self.catalog_name = f"ctlg_{branch.replace('-', '_')}"
+            create_catalog_sql = f"""
+            CREATE CATALOG IF NOT EXISTS {self.catalog_name} USING iceberg WITH (
+                "iceberg.catalog.type" = 'nessie',
+                "iceberg.nessie-catalog.uri" = 'http://nessie:19120/api/v2',
+                "iceberg.nessie-catalog.ref" = '{branch}',
+                "iceberg.nessie-catalog.default-warehouse-dir" = 's3a://warehouse/',
+                "fs.native-s3.enabled" = 'true',
+                "s3.endpoint" = 'http://minio:9000',
+                "s3.region" = 'us-east-1',
+                "s3.path-style-access" = 'true',
+                "s3.aws-access-key" = 'admin',
+                "s3.aws-secret-key" = 'minio123456',
+                "iceberg.file-format" = 'PARQUET'
+            )
+            """
+            try:
+                with trino.dbapi.connect(
+                    host=settings.trino_host, port=settings.trino_port, user=settings.trino_user
+                ) as tmp_conn:
+                    tmp_conn.cursor().execute(create_catalog_sql)
+            except Exception:
+                pass
 
         self.conn = trino.dbapi.connect(
             host=settings.trino_host,
             port=settings.trino_port,
             user=settings.trino_user,
-            catalog=catalog or settings.trino_catalog,
+            catalog=self.catalog_name,
             schema=schema or settings.trino_schema,
-            session_properties=session_props if session_props else None,
         )
         self._cursor = None
+
+    def _replace_catalog_in_sql(self, sql: str) -> str:
+        if self.catalog_name != self.original_catalog:
+            import re
+            return re.sub(rf'\b{self.original_catalog}\b\.', f"{self.catalog_name}.", sql)
+        return sql
 
     # ── Basic Execute ─────────────────────────────────────────────────────────
 
     def execute(self, sql: str, params=None) -> list:
+        sql = self._replace_catalog_in_sql(sql)
         self._cursor = self.conn.cursor()
         self._cursor.execute(sql, params)
         try:
@@ -47,6 +76,7 @@ class TrinoService:
         Execute SQL và trả về (trino_query_id, rows_affected).
         query_id dùng để link sang Trino UI và theo dõi status.
         """
+        sql = self._replace_catalog_in_sql(sql)
         cursor = self.conn.cursor()
         cursor.execute(sql)
 

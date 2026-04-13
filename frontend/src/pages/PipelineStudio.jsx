@@ -15,7 +15,7 @@ import {
   X, ChevronRight, Loader, ArrowLeft, Layers, Power, PowerOff,
   GitBranch, Terminal, Info,
 } from 'lucide-react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 
 import * as api from '../api/client'
 import { NODE_TYPES } from './pipeline-studio/nodes/NodeTypes'
@@ -62,6 +62,18 @@ export default function PipelineStudio() {
   useEffect(() => {
     if (id) loadPipeline(id)
   }, [id])
+
+  // ── Sync tab from URL query ───────────────────────────────────────────────
+  const location = useLocation()
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const tab = params.get('tab')
+    if (tab === 'runs' || tab === 'history') {
+      setMainTab('history')
+    } else if (tab === 'sql') {
+      setMainTab('sql')
+    }
+  }, [location.search])
 
   async function loadPipeline(pipelineId) {
     setLoading(true)

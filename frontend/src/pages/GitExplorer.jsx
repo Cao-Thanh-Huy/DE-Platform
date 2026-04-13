@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react'
-import { GitBranch, Plus, Trash2, GitMerge, GitCommit, RefreshCw, Tag, CheckCircle, AlertTriangle } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { GitBranch, Plus, Trash2, GitMerge, GitCommit, RefreshCw, Tag, CheckCircle, AlertTriangle, ExternalLink, Clock } from 'lucide-react'
 import * as api from '../api/client'
 
 export default function GitExplorer() {
   const [branches, setBranches] = useState([])
   const [tags, setTags] = useState([])
+  const [pipelines, setPipelines] = useState([])
   const [selectedBranch, setSelectedBranch] = useState(null)
   const [log, setLog] = useState([])
   const [contents, setContents] = useState([])
@@ -23,7 +25,14 @@ export default function GitExplorer() {
     setTimeout(() => setToast(null), 6000)
   }
 
-  useEffect(() => { loadBranches(); loadTags() }, [])
+  useEffect(() => { loadBranches(); loadTags(); loadPipelines(); }, [])
+
+  async function loadPipelines() {
+    try {
+      const data = await api.listPipelines()
+      setPipelines(data.pipelines || [])
+    } catch (e) { console.error(e) }
+  }
 
   async function loadBranches() {
     try {
@@ -174,24 +183,55 @@ export default function GitExplorer() {
                   {mrBranches.map(b => {
                     // Extract human-readable name by stripping prefix and run_id
                     let displayName = b.name.replace('pipeline_', '');
+                    let timestamp = null;
+                    let runId = null;
                     const parts = b.name.split('_');
                     if (parts.length > 2 && !isNaN(parseInt(parts[1]))) {
                       // Has timestamp: pipeline_{timestamp}_{name}_run_{id}
-                      // Extract just the {name} part for UI
+                      timestamp = parseInt(parts[1]);
                       const runIndex = b.name.indexOf('_run_');
                       if (runIndex > -1) {
                         displayName = b.name.substring(`pipeline_${parts[1]}_`.length, runIndex);
+                        runId = b.name.substring(runIndex + 5);
                       }
                     }
                     
+                    const pipeline = pipelines.find(p => p.name.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '').toLowerCase() === displayName.toLowerCase());
+                    const timeStr = timestamp ? new Date(timestamp * 1000).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '';
+
                     return (
                       <div key={b.name}
                         className={`sidebar-link ${selectedBranch === b.name ? 'active' : ''}`}
-                        onClick={() => selectBranch(b.name)}
-                        style={{ borderLeft: selectedBranch === b.name ? '3px solid var(--accent-success)' : 'none' }}
+                        style={{ 
+                          borderLeft: selectedBranch === b.name ? '3px solid var(--accent-success)' : 'none',
+                          flexDirection: 'column', 
+                          alignItems: 'flex-start',
+                          padding: '8px 12px',
+                          cursor: 'pointer'
+                        }}
                       >
-                        <GitMerge size={14} style={{ color: 'var(--accent-success)' }} />
-                        <span className="truncate text-xs" style={{ flex: 1 }} title={b.name}>{displayName}</span>
+                        <div className="flex align-center w-full" onClick={() => selectBranch(b.name)} style={{ width: '100%', justifyContent: 'space-between' }}>
+                          <div className="flex align-center" style={{ overflow: 'hidden' }}>
+                            <GitMerge size={14} style={{ color: 'var(--accent-success)', marginRight: '8px', flexShrink: 0 }} />
+                            <span className="truncate" style={{ fontWeight: 500 }} title={b.name}>{displayName}</span>
+                          </div>
+                          {pipeline && (
+                            <Link 
+                              to={`/pipelines/${pipeline.id}?tab=runs`} 
+                              onClick={e => e.stopPropagation()}
+                              title="Nhảy đến Pipeline Run"
+                              style={{ color: 'var(--text-muted)' }}
+                            >
+                              <ExternalLink size={14} />
+                            </Link>
+                          )}
+                        </div>
+                        {(timeStr || runId) && (
+                          <div className="flex align-center gap-2 text-xs text-muted" style={{ paddingLeft: '22px', marginTop: '4px' }} onClick={() => selectBranch(b.name)}>
+                            {timeStr && <span className="flex align-center"><Clock size={10} style={{ marginRight: '4px' }}/> {timeStr}</span>}
+                            {runId && <span>#{runId.substring(0, 8)}</span>}
+                          </div>
+                        )}
                       </div>
                     )
                   })}

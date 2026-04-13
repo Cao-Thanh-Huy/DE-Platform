@@ -25,6 +25,7 @@ from sqlalchemy.orm import selectinload
 from app.db.database import AsyncSessionLocal
 from app.db.models import Pipeline, PipelineRun, PipelineSchedule, PipelineVersion, TaskRun
 from app.services.trino_service import TrinoService
+from app.services.nessie_service import NessieService
 
 log = logging.getLogger("de.scheduler")
 
@@ -52,8 +53,26 @@ async def _execute_pipeline_run(
         session.add(run)
         await session.flush()
 
+        import re
+        import time
+        safe_name = re.sub(r'[^a-zA-Z0-9]+', '_', pipeline_name).strip('_').lower()
+        branch_name = f"pipeline_{int(time.time())}_{safe_name}_run_{str(run.id).replace('-', '')[:8]}"
+        
+        nessie_svc = NessieService()
         try:
-            trino = TrinoService()
+            await nessie_svc.create_branch(branch_name, source_branch="main")
+            run.branch_name = branch_name
+            await session.flush()
+        except Exception as e:
+            log.error(f"[scheduler] Failed to create branch {branch_name}: {e}")
+            run.status = "failed"
+            run.error_message = f"Failed to create branch: {e}"
+            run.ended_at = datetime.now(timezone.utc)
+            await session.commit()
+            return
+
+        try:
+            trino = TrinoService(branch=branch_name)
             query_id, rows = trino.execute_with_tracking(compiled_sql)
 
             task = TaskRun(
@@ -78,6 +97,15 @@ async def _execute_pipeline_run(
             log.error(f"[scheduler] ❌ '{pipeline_name}' run failed: {e}")
             run.status = "failed"
             run.error_message = str(e)
+            
+            # Clean up failed branch
+            try:
+                await nessie_svc.delete_branch(branch_name)
+                try:
+                    TrinoService().drop_catalog(f"ctlg_{branch_name.replace('-', '_')}")
+                except Exception: pass
+            except Exception as clean_err:
+                log.error(f"[scheduler] Cannot delete failed branch {branch_name}: {clean_err}")
 
         run.ended_at = datetime.now(timezone.utc)
 
